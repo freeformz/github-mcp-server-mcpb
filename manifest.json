@@ -1,0 +1,96 @@
+{
+  "manifest_version": "0.3",
+  "name": "github-mcp-server",
+  "display_name": "GitHub MCP Server",
+  "version": "0.32.0",
+  "description": "GitHub's official MCP server for interacting with repositories, issues, pull requests, actions, code security, and more.",
+  "long_description": "The GitHub MCP Server provides comprehensive access to GitHub's API through the Model Context Protocol. Manage repositories, issues, pull requests, GitHub Actions workflows, code security alerts, discussions, notifications, and more — all from your AI assistant.\n\nRequires a GitHub Personal Access Token with appropriate scopes (repo, read:packages, read:org recommended).",
+  "author": {
+    "name": "GitHub",
+    "url": "https://github.com/github/github-mcp-server"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/github/github-mcp-server"
+  },
+  "homepage": "https://github.com/github/github-mcp-server",
+  "support": "https://github.com/github/github-mcp-server/issues",
+  "keywords": [
+    "github",
+    "git",
+    "repositories",
+    "issues",
+    "pull-requests",
+    "actions",
+    "code-security",
+    "copilot"
+  ],
+  "server": {
+    "type": "binary",
+    "entry_point": "server/github-mcp-server",
+    "mcp_config": {
+      "command": "${__dirname}/server/github-mcp-server",
+      "args": ["stdio"],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "${user_config.github_token}",
+        "GITHUB_TOOLSETS": "${user_config.toolsets}",
+        "GITHUB_HOST": "${user_config.github_host}"
+      },
+      "platform_overrides": {
+        "win32": {
+          "command": "${__dirname}/server/github-mcp-server.exe",
+          "args": ["stdio"]
+        }
+      }
+    }
+  },
+  "tools": [
+    { "name": "get_file_contents", "description": "Get contents of a file or directory from a GitHub repository" },
+    { "name": "search_code", "description": "Search for code across GitHub repositories" },
+    { "name": "search_repositories", "description": "Search for GitHub repositories" },
+    { "name": "create_repository", "description": "Create a new GitHub repository" },
+    { "name": "list_issues", "description": "List issues in a GitHub repository" },
+    { "name": "get_issue", "description": "Get details of a specific issue" },
+    { "name": "create_issue", "description": "Create a new issue in a GitHub repository" },
+    { "name": "update_issue", "description": "Update an existing issue" },
+    { "name": "add_issue_comment", "description": "Add a comment to an issue" },
+    { "name": "list_pull_requests", "description": "List pull requests in a repository" },
+    { "name": "get_pull_request", "description": "Get details of a specific pull request" },
+    { "name": "create_pull_request", "description": "Create a new pull request" },
+    { "name": "merge_pull_request", "description": "Merge a pull request" },
+    { "name": "get_pull_request_diff", "description": "Get the diff of a pull request" },
+    { "name": "list_workflows", "description": "List GitHub Actions workflows" },
+    { "name": "get_workflow_run", "description": "Get details of a workflow run" },
+    { "name": "list_code_scanning_alerts", "description": "List code scanning alerts" },
+    { "name": "list_dependabot_alerts", "description": "List Dependabot alerts" },
+    { "name": "list_secret_scanning_alerts", "description": "List secret scanning alerts" }
+  ],
+  "tools_generated": true,
+  "user_config": {
+    "github_token": {
+      "type": "string",
+      "title": "GitHub Personal Access Token",
+      "description": "A GitHub Personal Access Token with repo, read:packages, and read:org scopes. Create one at https://github.com/settings/personal-access-tokens/new",
+      "required": true,
+      "sensitive": true
+    },
+    "toolsets": {
+      "type": "string",
+      "title": "Toolsets",
+      "description": "Comma-separated list of toolsets to enable (e.g. repos,issues,pull_requests,actions,code_security). Leave empty for defaults.",
+      "required": false,
+      "default": ""
+    },
+    "github_host": {
+      "type": "string",
+      "title": "GitHub Host",
+      "description": "GitHub Enterprise hostname (e.g. github.mycompany.com). Leave empty for github.com.",
+      "required": false,
+      "default": ""
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"]
+  }
+}

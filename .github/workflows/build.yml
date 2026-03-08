@@ -1,0 +1,179 @@
+name: Build MCPB Bundles
+
+on:
+  schedule:
+    - cron: '0 */4 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Upstream version to build (e.g. 0.32.0). Leave empty for latest.'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      should_build: ${{ steps.check.outputs.should_build }}
+    steps:
+      - name: Determine version
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            VERSION="${{ inputs.version }}"
+          else
+            VERSION=$(gh release view --repo github/github-mcp-server --json tagName --jq '.tagName' | sed 's/^v//')
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Building version: ${VERSION}"
+
+      - name: Check for existing release
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if gh release view "v${VERSION}" --repo "${{ github.repository }}" &>/dev/null; then
+            echo "Release v${VERSION} already exists, skipping."
+            echo "should_build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "No existing release for v${VERSION}, proceeding."
+            echo "should_build=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check-version
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: Darwin
+            arch: arm64
+            archive: tar.gz
+          - platform: Darwin
+            arch: x86_64
+            archive: tar.gz
+          - platform: Linux
+            arch: arm64
+            archive: tar.gz
+          - platform: Linux
+            arch: i386
+            archive: tar.gz
+          - platform: Linux
+            arch: x86_64
+            archive: tar.gz
+          - platform: Windows
+            arch: arm64
+            archive: zip
+          - platform: Windows
+            arch: i386
+            archive: zip
+          - platform: Windows
+            arch: x86_64
+            archive: zip
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set version
+        id: vars
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          ASSET_NAME="github-mcp-server_${{ matrix.platform }}_${{ matrix.arch }}.${{ matrix.archive }}"
+          MCPB_NAME="github-mcp-server-${VERSION}-${{ matrix.platform }}-${{ matrix.arch }}.mcpb"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "asset_name=${ASSET_NAME}" >> "$GITHUB_OUTPUT"
+          echo "mcpb_name=${MCPB_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Download upstream asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.vars.outputs.version }}"
+          gh release download "v${VERSION}" \
+            --repo github/github-mcp-server \
+            --pattern "${{ steps.vars.outputs.asset_name }}" \
+            --dir .
+
+      - name: Download checksums and verify
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ steps.vars.outputs.version }}"
+          gh release download "v${VERSION}" \
+            --repo github/github-mcp-server \
+            --pattern "github-mcp-server_${VERSION}_checksums.txt" \
+            --dir .
+          grep "${{ steps.vars.outputs.asset_name }}" "github-mcp-server_${VERSION}_checksums.txt" | sha256sum -c
+
+      - name: Extract binary
+        run: |
+          mkdir -p work/server
+          if [ "${{ matrix.archive }}" = "zip" ]; then
+            unzip "${{ steps.vars.outputs.asset_name }}" -d work/server
+          else
+            tar -xzf "${{ steps.vars.outputs.asset_name }}" -C work/server
+          fi
+          # Ensure binary is executable (no-op on Windows but harmless)
+          chmod +x work/server/github-mcp-server* 2>/dev/null || true
+
+      - name: Prepare manifest
+        run: |
+          VERSION="${{ steps.vars.outputs.version }}"
+          jq --arg v "$VERSION" '.version = $v' manifest.json > work/manifest.json
+
+      - name: Build MCPB
+        run: |
+          cd work
+          zip -r "../${{ steps.vars.outputs.mcpb_name }}" manifest.json server/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.vars.outputs.mcpb_name }}
+          path: ${{ steps.vars.outputs.mcpb_name }}
+
+  release:
+    needs: [check-version, build]
+    if: needs.check-version.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -lh artifacts/
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION="${{ needs.check-version.outputs.version }}"
+          gh release create "v${VERSION}" \
+            --repo "${{ github.repository }}" \
+            --title "GitHub MCP Server v${VERSION}" \
+            --notes "MCPB bundles for [GitHub MCP Server v${VERSION}](https://github.com/github/github-mcp-server/releases/tag/v${VERSION}).
+
+          Install by opening the \`.mcpb\` file for your platform in Claude Desktop.
+
+          | Platform | Architecture | File |
+          |----------|-------------|------|
+          | macOS | arm64 (Apple Silicon) | \`github-mcp-server-${VERSION}-Darwin-arm64.mcpb\` |
+          | macOS | x86_64 (Intel) | \`github-mcp-server-${VERSION}-Darwin-x86_64.mcpb\` |
+          | Linux | x86_64 | \`github-mcp-server-${VERSION}-Linux-x86_64.mcpb\` |
+          | Linux | arm64 | \`github-mcp-server-${VERSION}-Linux-arm64.mcpb\` |
+          | Linux | i386 | \`github-mcp-server-${VERSION}-Linux-i386.mcpb\` |
+          | Windows | x86_64 | \`github-mcp-server-${VERSION}-Windows-x86_64.mcpb\` |
+          | Windows | arm64 | \`github-mcp-server-${VERSION}-Windows-arm64.mcpb\` |
+          | Windows | i386 | \`github-mcp-server-${VERSION}-Windows-i386.mcpb\` |" \
+            artifacts/*.mcpb
